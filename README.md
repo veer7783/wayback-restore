@@ -1,6 +1,7 @@
 # Project Hindu Kush Restorer
 
-Restore [projecthindukush.com](https://projecthindukush.com/) listings from the [Internet Archive Wayback Machine](https://web.archive.org/) into a local WordPress site.
+Restore [site}
+listings from the [Internet Archive Wayback Machine](https://web.archive.org/) into a local WordPress site.
 
 This tool extracts the original WordPress/ListingPro **content and data structure**. It does not invent pages and does not download ListingPro from ThemeForest. Provide your own legitimate theme ZIP.
 
