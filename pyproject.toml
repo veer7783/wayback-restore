@@ -1,0 +1,11 @@
+[project]
+name = "project-hindu-kush-restorer"
+version = "0.1.0"
+description = "Restore projecthindukush.com listings from the Internet Archive"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

@@ -1,0 +1,103 @@
+project:
+  name: project-hindu-kush-restorer
+  source_site: https://projecthindukush.com/
+  known_test_url: https://projecthindukush.com/incident/2006-varanasi-bombings-varanasi-india/
+  known_test_timestamp: "20260215104259"
+  known_test_archive_url: https://web.archive.org/web/20260215104259/https://projecthindukush.com/incident/2006-varanasi-bombings-varanasi-india/
+
+wayback:
+  domain: projecthindukush.com
+  path_prefix: /incident/
+  cdx_endpoint: https://web.archive.org/cdx/search/cdx
+  availability_endpoint: https://archive.org/wayback/available
+  raw_modifier: id_
+  delay_seconds: 2.0
+  timeout_seconds: 60
+  max_retries: 5
+  page_size: 100
+  snapshot_cutoff: "20260228235959"
+  user_agent: "PKH-Restorer/0.1 (projecthindukush local restoration; respectful of archive.org rate limits)"
+  allowed_download_hosts:
+    - web.archive.org
+    - archive.org
+    - projecthindukush.com
+    - www.projecthindukush.com
+  skip_url_substrings:
+    - google-analytics.com
+    - googletagmanager.com
+    - googleadservices.com
+    - doubleclick.net
+    - googlesyndication.com
+    - maps.googleapis.com
+    - maps.gstatic.com
+    - facebook.net
+    - facebook.com/tr
+    - hotjar.com
+    - wp-hummingbird
+    - hummingbird-cache
+    - pagead
+    - adsense
+    - /ads/
+    - analytics.js
+    - gtm.js
+
+scoring:
+  status_200: 50
+  mime_html: 30
+  listingpro_markers: 20
+  main_content: 20
+  images: 10
+  expected_fields: 10
+  length_bonus_max: 8
+  recency_bonus_max: 5
+
+restore:
+  default_limit: 50
+  incident_url_pattern: "/incident/"
+  exclude_url_patterns:
+    - "/page/"
+    - "/feed/"
+    - "/wp-json/"
+    - "/wp-admin/"
+    - "/wp-login"
+    - "/comment-page-"
+    - "?"
+  required_fields:
+    - date
+    - murdered
+    - perpetrators
+    - were_you_there
+    - collected_by
+    - source
+    - location
+
+match_weights:
+  title: 0.20
+  content: 0.30
+  fields: 0.20
+  images: 0.15
+  url: 0.05
+  category: 0.05
+  location: 0.05
+
+wordpress:
+  default_post_type: listing
+  fallback_post_type: post
+  default_status: publish
+  plugin_slug: pkh-restorer
+
+paths:
+  raw_html: data/raw/html
+  snapshots: data/snapshots
+  parsed: data/parsed
+  media: data/media
+  exports: data/exports
+  logs: data/logs
+  sqlite: data/restorer.db
+  cdx_jsonl: data/exports/cdx.jsonl
+  selected_snapshots: data/exports/selected_snapshots.json
+  restore_preview_json: data/exports/restore-preview.json
+  restore_preview_csv: data/exports/restore-preview.csv
+  validation_csv: data/exports/validation-report.csv
+  listingpro_schema: data/exports/listingpro-schema.json
+  errors_jsonl: data/logs/errors.jsonl

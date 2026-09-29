@@ -1,0 +1,39 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+*.log
+
+# Local secrets and runtime state
+data/restorer.db
+data/restorer.db-journal
+data/raw/**
+data/snapshots/**
+data/parsed/**
+data/media/**
+data/exports/**
+data/logs/**
+data/backups/**
+*.sql
+!data/**/.gitkeep
+tools/wp-cli.phar
+
+# User-supplied licensed theme and demo packages
+theme/*.zip
+theme/listingpro/
+theme/listingpro-*/
+theme/_extracted/
+theme/Bulk Import Add-on/
+theme/Child Theme/
+theme/Live-demo-Content/
+
+# Docker leftovers
+docker/mysql/

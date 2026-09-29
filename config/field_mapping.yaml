@@ -1,0 +1,108 @@
+# Editable mapping from archived ListingPro pages to normalized restore fields.
+# source: take a parser/extractor property
+# source_label: find a labeled detail whose visible label matches (case-insensitive)
+# aliases: extra labels seen on archived pages
+
+listing_title:
+  source: title
+
+listing_description:
+  source: content
+
+canonical_url:
+  source: canonical_url
+
+category:
+  source: category
+  aliases:
+    - category
+    - listing category
+    - incident type
+
+location:
+  source: location
+  source_label: LOCATION
+  aliases:
+    - location
+    - city
+    - place
+
+incident_date:
+  target: date
+  source_label: DATE
+  aliases:
+    - date
+    - incident date
+    - when
+
+murdered:
+  target: murdered
+  source_label: HOW MANY WERE MURDERED?
+  aliases:
+    - how many were murdered?
+    - how many were murdered
+    - murdered
+    - casualties
+    - killed
+
+perpetrators:
+  target: perpetrators
+  source_label: PERPETRATORS
+  aliases:
+    - perpetrators
+    - perpetrator
+    - accused
+    - group
+
+were_you_there:
+  target: were_you_there
+  source_label: WERE YOU THERE?
+  aliases:
+    - were you there?
+    - were you there
+    - eyewitness
+
+collected_by:
+  target: collected_by
+  source_label: COLLECTED BY
+  aliases:
+    - collected by
+    - collector
+    - reported as seen
+
+source:
+  target: source
+  source_label: WHERE DID YOU COME TO KNOW ABOUT THIS EVENT FROM?
+  aliases:
+    - where did you come to know about this event from
+    - where did you come to know about this event from?
+    - where did you come to know about this event from ? (please provide source link)
+    - source
+    - source link
+
+# ListingPro detection markers. These are signals, not hard-coded field values.
+listingpro_markers:
+  css_classes:
+    - listing
+    - listingpro
+    - lp-listing
+    - listing-second-view
+    - lp-listing-title
+    - listing-details
+    - listing-app-view
+    - post-meta-info
+    - additional-details
+    - lp-listing-additional
+    - listing-cat
+    - listing-location
+  html_ids:
+    - listing-app-view
+    - listing
+  text_tokens:
+    - listingpro
+    - lp_
+    - listing-category
+    - listing-location
+  meta_keys:
+    - lp_listingpro_options
+    - listingpro
