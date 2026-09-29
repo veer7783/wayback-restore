@@ -14,7 +14,7 @@ from pipeline.static_pages import run_static_pages
 from pipeline.context import build_runtime
 from pipeline.discover import run_discover
 from pipeline.report import run_report
-from pipeline.restore import run_extract, run_media, run_restore, run_scrape
+from pipeline.restore import prepare_new_imports, run_extract, run_media, run_restore, run_scrape
 from pipeline.setup import inspect_listingpro, install_listingpro_stack, install_theme, run_setup
 from pipeline.wp_status import run_wp_status
 from pipeline.snapshots_cmd import run_snapshots
@@ -50,8 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("inspect-listingpro", help="Inspect installed ListingPro schema")
 
-    restore = sub.add_parser("restore", help="Full restore pipeline")
-    restore.add_argument("--limit", type=int, default=None)
+    restore = sub.add_parser(
+        "restore",
+        help="Import N new unique listings that are not already in WordPress",
+    )
+    restore.add_argument("--limit", type=int, required=True, help="How many new unique posts to save")
     restore.add_argument("--dry-run", action="store_true")
     restore.add_argument(
         "--no-scrape",
@@ -112,16 +115,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Taxonomies: {schema.get('taxonomies')}")
             print(f"Meta fields: {len(schema.get('meta_fields') or [])}")
         elif args.command == "restore":
-            limit = _limit(args, default_limit)
+            limit = int(args.limit)
             if not args.no_scrape:
-                run_discover(runtime, limit)
-                run_snapshots(runtime, limit)
+                prepared = prepare_new_imports(runtime, limit)
+                print(f"Already in WordPress: {prepared['already']}")
+                print(f"New pages selected: {len(prepared['snapshots'])}")
+                if not prepared["snapshots"]:
+                    print("No new unique incident pages found.")
+                    return 0
                 run_scrape(runtime, limit)
                 run_extract(runtime, limit)
                 run_media(runtime, limit)
             result = run_restore(runtime, limit, dry_run=args.dry_run)
-            print(f"Restore rows: {len(result['rows'])}")
-            print(f"Imported: {result['imported']}")
+            created = [row for row in result["rows"] if row.get("status") == "created"]
+            print(f"New posts saved: {len(created)}")
+            for row in created:
+                print(f"  {row.get('wp_post_id')} {row.get('title')} {row.get('wp_url')}")
+            failed = [row for row in result["rows"] if row.get("status") == "failed"]
+            if failed:
+                print(f"Failed: {len(failed)}")
             if args.dry_run:
                 print("Dry run only. WordPress was not modified.")
         elif args.command == "batch-10":

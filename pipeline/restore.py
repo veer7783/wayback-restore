@@ -13,20 +13,174 @@ from typing import Any
 from extractor.ai_extractor import apply_ai_extraction
 from extractor.listing_extractor import ExtractedListing, extract_listing, write_extracted
 from pipeline.context import Runtime
-from scraper.cdx import read_cdx_jsonl
+from pipeline.wpcli import wp
+from scraper.archive_client import ArchiveClientError
+from scraper.cdx import CDXClient, _snapshots_for_url, read_cdx_jsonl, write_cdx_jsonl
 from scraper.downloader import download_snapshot, load_html
+from scraper.eligibility import DEFAULT_SNAPSHOT_CUTOFF
 from scraper.media import MediaAsset, download_media_asset
 from scraper.parser import parse_archived_page
-from scraper.snapshots import SelectedSnapshot, read_selected_snapshots
-from scraper.urls import slug_from_url, url_hash
+from scraper.snapshots import SelectedSnapshot, read_selected_snapshots, select_best_snapshot, write_selected_snapshots
+from scraper.urls import is_incident_url, slug_from_url, strip_www, url_hash
 from utils.config import resolve_path
 from wordpress.importer import build_payload
 from wordpress.listingpro import choose_post_type
 from wordpress.listingpro_mapping import source_to_listingpro_mapping
 from wordpress.restore_media import download_listing_media
-from wordpress.wpcli_importer import backup_database, import_payload_wpcli, set_listing_slug
+from wordpress.wpcli_importer import (
+    backup_database,
+    import_payload_wpcli,
+    json_from_output,
+    set_listing_slug,
+)
 
 LOGGER = logging.getLogger("pkh.restore")
+
+
+def is_placeholder_listing(title: str, content: str) -> bool:
+    """True when the capture is a bot wall or has no incident text."""
+    title_text = (title or "").strip().lower()
+    if any(
+        marker in title_text
+        for marker in ("one moment", "attention required", "just a moment", "checking your browser")
+    ):
+        return True
+    return len((content or "").strip()) < 80
+
+
+def snapshot_has_listing(runtime: Runtime, snapshot: SelectedSnapshot) -> bool:
+    html_dir = resolve_path(runtime.config, "raw_html")
+    download_snapshot(runtime.client, snapshot, html_dir)
+    html, _meta = load_html(html_dir, snapshot.original_url)
+    if not html:
+        return False
+    parsed = parse_archived_page(html, snapshot.original_url, runtime.config["wayback"]["domain"])
+    if is_placeholder_listing(str(parsed.get("title") or ""), str(parsed.get("content") or "")):
+        return False
+    return True
+
+
+def next_unique_urls(candidates: list[str], excluded: set[str], limit: int) -> list[str]:
+    """Return up to ``limit`` incident URLs that are not already imported."""
+    chosen: list[str] = []
+    seen: set[str] = set()
+    blocked = {strip_www(url) for url in excluded}
+    for raw in candidates:
+        try:
+            url = strip_www(raw)
+        except ValueError:
+            continue
+        if url in blocked or url in seen:
+            continue
+        seen.add(url)
+        chosen.append(url)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
+def wordpress_imported_urls(runtime: Runtime) -> set[str]:
+    """Source URLs already stored on listings. Stops if WordPress cannot be read."""
+    settings = runtime.config["settings"]
+    snippet = """
+$posts = get_posts(array('post_type'=>'listing','post_status'=>'any','numberposts'=>-1));
+$out = array();
+foreach ($posts as $post) {
+    $source = get_post_meta($post->ID, '_archive_source_url', true);
+    if ($source) { $out[rtrim($source, '/')] = (int) $post->ID; }
+}
+echo wp_json_encode($out);
+"""
+    snippet_path = Path(settings.wp_path) / "wp-content" / "uploads" / "pkh-imported-urls.php"
+    snippet_path.parent.mkdir(parents=True, exist_ok=True)
+    snippet_path.write_text("<?php\n" + snippet, encoding="utf-8")
+    result = wp(settings.php_binary, settings.wp_path, ["eval-file", str(snippet_path)], check=False)
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    if result.returncode != 0:
+        raise RuntimeError(f"Could not read existing WordPress listings: {combined[-500:]}")
+    try:
+        data = json_from_output(combined)
+    except ValueError as exc:
+        raise RuntimeError("Could not read existing WordPress listings.") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("Could not read existing WordPress listings.")
+    return {strip_www(str(url)) for url in data}
+
+
+def prepare_new_imports(runtime: Runtime, limit: int) -> dict[str, Any]:
+    """Choose ``limit`` incident pages that are not already WordPress listings."""
+    if limit < 1:
+        raise ValueError("Post count must be at least 1")
+    excluded = wordpress_imported_urls(runtime)
+    wayback = runtime.config["wayback"]
+    cutoff = str(wayback.get("snapshot_cutoff") or DEFAULT_SNAPSHOT_CUTOFF)
+    prefix = f"{wayback['domain']}{wayback['path_prefix']}"
+    cdx = CDXClient(runtime.client, wayback["cdx_endpoint"])
+    availability = wayback.get("availability_endpoint") or "https://archive.org/wayback/available"
+    selected: list[SelectedSnapshot] = []
+    seen: set[str] = set()
+    records = []
+    resume: str | None = None
+    pages = 0
+    while len(selected) < limit and pages < 8:
+        try:
+            collapsed, resume = cdx.search(
+                prefix,
+                match_type="prefix",
+                collapse="urlkey",
+                limit=400,
+                filters=["statuscode:200", "mimetype:text/html"],
+                to_ts=cutoff,
+                resume_key=resume,
+            )
+        except ArchiveClientError as exc:
+            LOGGER.warning("CDX discovery stopped: %s", exc)
+            break
+        pages += 1
+        for record in collapsed:
+            try:
+                url = strip_www(record.normalized_url)
+            except ValueError:
+                continue
+            if not is_incident_url(url, wayback["path_prefix"]):
+                continue
+            if url in excluded or url in seen:
+                continue
+            seen.add(url)
+            try:
+                snapshots = _snapshots_for_url(cdx, url, availability, cutoff)
+            except ArchiveClientError as exc:
+                LOGGER.warning("Snapshot lookup failed for %s: %s", url, exc)
+                continue
+            choice = select_best_snapshot(
+                snapshots,
+                weights=runtime.config.get("scoring"),
+                cutoff=cutoff,
+            )
+            if not choice or not choice.timestamp or choice.eligibility_status != "eligible":
+                LOGGER.info("No eligible snapshot for %s", url)
+                continue
+            if not snapshot_has_listing(runtime, choice):
+                LOGGER.info("Skipping archive page with no listing text: %s", url)
+                continue
+            selected.append(choice)
+            records.extend(snapshots)
+            LOGGER.info("Selected new incident %s", url)
+            if len(selected) >= limit:
+                break
+        if not resume:
+            break
+
+    write_selected_snapshots(selected, resolve_path(runtime.config, "selected_snapshots"))
+    if records:
+        write_cdx_jsonl(records, resolve_path(runtime.config, "cdx_jsonl"))
+    LOGGER.info(
+        "Already in WordPress: %s | New pages selected: %s | Requested: %s",
+        len(excluded),
+        len(selected),
+        limit,
+    )
+    return {"already": len(excluded), "snapshots": selected}
 
 
 def _selected(runtime: Runtime, limit: int) -> list[SelectedSnapshot]:
@@ -183,6 +337,12 @@ def run_restore(runtime: Runtime, limit: int, dry_run: bool) -> dict[str, Any]:
                 preview_rows.append(row_out)
                 continue
             listing = ExtractedListing.model_validate(json.loads(path.read_text(encoding="utf-8")))
+            if is_placeholder_listing(listing.title or "", listing.content or ""):
+                row_out["status"] = "skipped-empty-archive"
+                row_out["title"] = listing.title or ""
+                LOGGER.info("Not importing empty archive page %s", snapshot.original_url)
+                preview_rows.append(row_out)
+                continue
             parsed = None
             if parsed_path.exists():
                 parsed = json.loads(parsed_path.read_text(encoding="utf-8"))
